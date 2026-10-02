@@ -22,7 +22,7 @@ bash <(curl -sSL https://raw.githubusercontent.com/llodys/snell/main/snell-alpin
 
 ### Snell（Serv00 / CT8 - FreeBSD 环境）
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/llodys/snell/main/snell-freebsd.sh)
+bash <(curl -sSL https://raw.githubusercontent.com/renogcp/Snell/master/snell-freebsd.sh)
 ```
 
 ### 爆破模式（重置 / 重新安装）
