@@ -464,3 +464,4 @@ if ! command -v curl &> /dev/null || ! command -v openssl &> /dev/null; then
 fi
 
 show_main_menu
+
