@@ -3,7 +3,7 @@
 #================================================================
 # 作者：myouhi
 # 仓库：https://github.com/myouhi/Snell
-# 描述: 这个脚本用于在 FreeBSD 系统上安装和管理 Snell 代理
+# 描述: 这个脚本用于在 FreeBSD 系统上安装和管理 Snell 代理（支持 v3 / v5）
 #================================================================
 
 # --- 定义颜色代码 ---
@@ -16,7 +16,7 @@ WHITE='\033[0;37m'  # 白色，用于特定文本
 RESET='\033[0m'     # 重置颜色
 
 # --- 脚本版本号 ---
-current_version="2.0"
+current_version="2.1"
 
 # --- 全局变量定义 ---
 SCRIPT_DIR="$HOME/app-data"
@@ -24,13 +24,15 @@ SCRIPT_PATH="$SCRIPT_DIR/app.sh"
 SNELL_EXECUTABLE="$SCRIPT_DIR/bin/core-service"
 SNELL_CONFIG="$SCRIPT_DIR/etc/app.json"
 SNELL_LOG_FILE="$SCRIPT_DIR/service.log"
-DOWNLOAD_URL="https://raw.githubusercontent.com/myouhi/Snell/master/core-service"
+
+DOWNLOAD_URL_V3="https://raw.githubusercontent.com/myouhi/Snell/master/app/v3/core-service"
+DOWNLOAD_URL_V5="https://raw.githubusercontent.com/myouhi/Snell/master/app/v5/core-service"
 
 # --- 基础函数 ---
 print_info() { echo -e "${GREEN}[信息]${RESET} $1"; }
 print_warning() { echo -e "${YELLOW}[警告]${RESET} $1"; }
 print_error() { echo -e "${RED}[错误]${RESET} $1"; }
-# --- 统一的按键继续函数 ---
+
 press_any_key_to_continue() {
     echo
     read -n 1 -s -r -p "按任意键返回主菜单..."
@@ -41,32 +43,35 @@ check_installation() {
     [ -f "$SNELL_EXECUTABLE" ]
 }
 
-# --- 核心功能函数 ---
+# 读取保存的版本信息
+get_installed_version_num() {
+    if [ -f "$SNELL_CONFIG" ]; then
+        local ver
+        ver=$(grep '^# snell_version' "$SNELL_CONFIG" | cut -d'=' -f2 | xargs)
+        if [ -n "$ver" ]; then
+            echo "$ver"
+            return
+        fi
+    fi
+    echo "3" # 默认回退值
+}
 
-# 获取 Snell 程序版本
+# 获取 Snell 程序版本字符串
 get_snell_version() {
     if ! check_installation; then
-        echo "未知"
+        echo "未安装"
         return
     fi
-    local version_output
-    version_output=$("$SNELL_EXECUTABLE" -v 2>&1)
-    local version
-    version=$(echo "$version_output" | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
-    if [ -n "$version" ]; then
-        echo "$version"
-    else
-        # 某些版本可能不遵循标准版本输出，提供一个回退值
-        echo "v3.0.0"
-    fi
+    local ver_num
+    ver_num=$(get_installed_version_num)
+    echo "v${ver_num}"
 }
-echo; echo "=================================================="
+
 # 启动 Snell 服务
 start_snell() {
     if ! check_installation; then print_error "Snell 未安装，无法启动。"; return 1; fi
     if pgrep -f "$SNELL_EXECUTABLE" > /dev/null; then print_warning "Snell 服务已经在运行中。"; return 0; fi
     print_info "正在启动 Snell 服务..."
-    # 启动前清空旧日志
     > "$SNELL_LOG_FILE"
     nohup "$SNELL_EXECUTABLE" -c "$SNELL_CONFIG" > "$SNELL_LOG_FILE" 2>&1 &
     sleep 2
@@ -74,17 +79,16 @@ start_snell() {
         print_info "✅ 服务已成功启动！"
         return 0
     else
-        # [新增] 检查特定的错误类型
         if grep -q "address already in use" "$SNELL_LOG_FILE"; then
             print_error "❌ 端口被占用！"
-            return 2 # 返回端口占用错误码
+            return 2
         elif grep -q "bind: operation not permitted" "$SNELL_LOG_FILE"; then
             print_error "❌ 权限错误：此端口未被系统允许使用！"
             print_warning "请确保您使用的端口是通过 Serv00 面板或 'devil' 命令正确申请并分配给您的端口。"
-            return 3 # 返回权限错误码
+            return 3
         else
             print_error "❌ 服务启动失败！请使用菜单选项 '6' 查看日志以确定问题。"
-            return 1 # 返回通用错误码
+            return 1
         fi
     fi
 }
@@ -128,20 +132,19 @@ display_config() {
 
     # 显示 Surge 格式配置
     print_info "Surge 配置格式 (可直接复制):"
-    local ip_addr port psk
+    local ip_addr port psk ver_num
     ip_addr=$(curl -s icanhazip.com)
     port=$(grep '^listen\s*=' "$SNELL_CONFIG" | cut -d':' -f2 | xargs)
     psk=$(grep '^psk\s*=' "$SNELL_CONFIG" | cut -d'=' -f2 | xargs)
+    ver_num=$(get_installed_version_num)
 
     if [ -n "$ip_addr" ] && [ -n "$port" ] && [ -n "$psk" ]; then
-        # 在 Surge 配置行中也加入 reuse 和 tfo
-        echo -e "${GREEN}Snell-Server = snell, $ip_addr, $port, psk=$psk, version=3, reuse=true, tfo=true${RESET}"
+        echo -e "${GREEN}Snell-Server = snell, $ip_addr, $port, psk=$psk, version=$ver_num, reuse=true, tfo=true${RESET}"
     else
         print_warning "未能生成 Surge 配置，请检查配置文件和网络连接。"
     fi
     echo "=================================================="; echo
     
-    # 使用青色(CYAN)高亮显示 IP 地址，使其更突出
     echo -e "${GREEN}[信息]${RESET} 您的 IP 地址是: ${CYAN}$ip_addr${RESET}"
     print_info "请根据以上信息在您的客户端中进行配置。"
 }
@@ -183,7 +186,6 @@ manage_autostart_menu() {
         echo -e "${CYAN}============================================${RESET}"
         
         local autostart_option_text=""
-        # 检查当前自启状态
         if crontab -l 2>/dev/null | grep -q "$SNELL_EXECUTABLE"; then
             echo -e "当前状态: ${GREEN}已开启${RESET}"
             autostart_option_text="更新"
@@ -210,7 +212,7 @@ manage_autostart_menu() {
                 read -n 1 -s -r -p "操作完成，按任意键继续..."
                 ;;
             0)
-                break # 退出子菜单循环
+                break
                 ;;
             *)
                 print_warning "无效输入。"
@@ -241,21 +243,34 @@ auto_get_port_with_devil() {
 run_installation() {
     echo
     if check_installation; then
-        print_warning "检测到已安装Snell，继续操作将覆盖现有配置！"
+        print_warning "检测到已安装 Snell，继续操作将停止旧服务并覆盖配置！"
         read -p "是否继续? (y/n): " confirm
         if [[ ! "$confirm" =~ ^[yY]$ ]]; then print_info "操作已取消。"; return; fi
+        stop_snell
     fi
 
-    if [ ! -f "$SNELL_EXECUTABLE" ]; then
-        print_info "首次安装，正在下载 Snell 程序..."
-        mkdir -p "$SCRIPT_DIR/bin" "$SCRIPT_DIR/etc"
-        if curl -L -s "$DOWNLOAD_URL" -o "$SNELL_EXECUTABLE" && chmod +x "$SNELL_EXECUTABLE"; then
-            print_info "下载成功。"
-        else
-            print_error "下载失败！请检查网络或链接是否有效。"
-            rm -f "$SNELL_EXECUTABLE"
-            return 1
-        fi
+    # 选择安装版本
+    echo -e "\n${CYAN}=== 请选择要安装的 Snell 版本 ===${RESET}"
+    echo -e "${GREEN}1.${RESET} Snell v3 (默认)"
+    echo -e "${GREEN}2.${RESET} Snell v5"
+    read -p "请输入选项 [1-2]: " ver_choice
+    
+    local download_url="$DOWNLOAD_URL_V3"
+    local target_ver="3"
+    if [ "$ver_choice" = "2" ]; then
+        download_url="$DOWNLOAD_URL_V5"
+        target_ver="5"
+    fi
+
+    print_info "正在下载 Snell v${target_ver} 程序..."
+    mkdir -p "$SCRIPT_DIR/bin" "$SCRIPT_DIR/etc"
+    
+    # 覆盖式下载新的二进制文件
+    if curl -L -s "$download_url" -o "$SNELL_EXECUTABLE" && chmod +x "$SNELL_EXECUTABLE"; then
+        print_info "下载成功。"
+    else
+        print_error "下载失败！请检查网络或链接是否有效。"
+        return 1
     fi
 
     while true; do
@@ -298,6 +313,7 @@ run_installation() {
         PSK=$(openssl rand -base64 24)
         
         {
+            echo "# snell_version=$target_ver"
             echo "[snell-server]"
             echo "listen = 0.0.0.0:$LISTEN_PORT"
             echo "psk = $PSK"
@@ -382,7 +398,7 @@ show_main_menu() {
         echo -e "${CYAN}--------------------------------------------${RESET}"
 
         local install_option_text="安装 Snell"
-        if check_installation; then install_option_text="重装 Snell"; fi
+        if check_installation; then install_option_text="重装/切换 Snell 版本"; fi
         
         echo -e "${YELLOW}=== 基础功能 ===${RESET}"
         echo -e "${GREEN}1.${RESET} ${install_option_text}"
@@ -417,7 +433,6 @@ show_main_menu() {
                 ;;
             5)
                 manage_autostart_menu
-                # 子菜单处理自己的逻辑，这里不需要暂停
                 ;;
             6)
                 view_log_file
@@ -444,7 +459,7 @@ if [ ! -f "$SCRIPT_PATH" ] && [ "$(basename "$0")" = "bash" ]; then
 fi
 
 if ! command -v curl &> /dev/null || ! command -v openssl &> /dev/null; then
-    print_error "错误：本脚本需要 'curl'和 'openssl'，请先确保它们已安装。"
+    print_error "错误：本脚本需要 'curl' 和 'openssl'，请先确保它们已安装。"
     exit 1
 fi
 
